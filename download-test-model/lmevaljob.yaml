@@ -1,0 +1,38 @@
+apiVersion: trustyai.opendatahub.io/v1alpha1
+kind: LMEvalJob
+metadata:
+  name: my-model-eval
+spec:
+  # Use local-completions to connect to an existing InferenceService
+  model: local-completions
+  
+  modelArgs:
+    # Your InferenceService URL
+    - name: base_url
+      value: "http://my-model-predictor.my-namespace.svc.cluster.local:8080/v1/completions"
+    
+    # Model name as registered in the InferenceService
+    - name: model
+      value: "facebook/opt-125m"
+    
+    # Request settings
+    - name: num_concurrent
+      value: "1"
+    - name: max_retries
+      value: "3"
+    - name: tokenized_requests
+      value: "false"
+  
+  # Evaluation tasks
+  taskList:
+    taskNames:
+      - "hellaswag"
+      - "arc_easy"
+  
+  # Optional settings
+  logSamples: true
+  batchSize: "1"
+  
+  # Limit examples per task (remove for full evaluation)
+  # limit: "100"
+

@@ -1,0 +1,44 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# Pipeline artifacts
+model_test_pipeline.yaml
+*.tar.gz
+
+# Promptfoo results
+promptfoo-results/
+promptfoo_results.json
+.promptfoo/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+
+# Local testing
+test-output/
+temp/
+
+
+
+
+

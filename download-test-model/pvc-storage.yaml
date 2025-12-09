@@ -1,0 +1,18 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: model-storage-pvc
+spec:
+  accessModes:
+    - ReadWriteMany  # Required for sharing between pipeline components
+  resources:
+    requests:
+      storage: 50Gi  # Adjust based on model size (e.g., 7B models need ~15GB)
+  storageClassName: ocs-storagecluster-cephfs  # Update to your storage class
+  # Common storage classes:
+  # - ocs-storagecluster-cephfs (OpenShift Data Foundation)
+  # - nfs-client
+  # - standard
+  # - gp2 (AWS EBS)
+  volumeMode: Filesystem
+
