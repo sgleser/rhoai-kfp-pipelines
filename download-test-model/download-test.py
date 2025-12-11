@@ -319,6 +319,265 @@ def start_vllm_and_test(
     return test_result
 
 
+@dsl.component(
+    base_image="registry.access.redhat.com/ubi9/nodejs-20:latest",
+    packages_to_install=[]
+)
+def test_with_promptfoo(
+    server_url: str,
+    model_name: str,
+    config_dir: str = "/mnt/models/promptfoo"
+):
+    """
+    Tests the vLLM server using Promptfoo evaluation framework
+    
+    Args:
+        server_url: URL of the vLLM server
+        model_name: Model name to use in tests
+        config_dir: Directory to store promptfoo config and results (on PVC)
+    """
+    import subprocess
+    import json
+    import os
+    import time
+    
+    print(f"Installing Promptfoo...")
+    subprocess.run(["npm", "install", "-g", "promptfoo"], check=True)
+    
+    print(f"Testing vLLM server at: {server_url}")
+    print(f"Model: {model_name}")
+    
+    # Create config directory
+    os.makedirs(config_dir, exist_ok=True)
+    os.chdir(config_dir)
+    
+    # Wait for server to be ready
+    print("Waiting for vLLM server to be ready...")
+    max_retries = 20
+    for i in range(max_retries):
+        try:
+            import urllib.request
+            urllib.request.urlopen(f"{server_url}/health", timeout=5)
+            print("Server is ready!")
+            break
+        except Exception as e:
+            print(f"Waiting... (attempt {i+1}/{max_retries})")
+            time.sleep(10)
+    else:
+        print("WARNING: Server health check failed, proceeding anyway...")
+    
+    # Create promptfoo configuration
+    config = {
+        "description": f"vLLM Model Test - {model_name}",
+        "providers": [
+            {
+                "id": "openai:chat:gpt-3.5-turbo",
+                "config": {
+                    "apiBaseUrl": f"{server_url}/v1",
+                    "apiKey": "dummy-key",
+                }
+            }
+        ],
+        "prompts": [
+            "Write a short story about {{topic}}",
+            "Explain {{concept}} in simple terms",
+            "Generate code to {{task}}"
+        ],
+        "tests": [
+            {
+                "vars": {
+                    "topic": "a robot learning to paint"
+                },
+                "assert": [
+                    {
+                        "type": "contains",
+                        "value": "robot"
+                    },
+                    {
+                        "type": "javascript",
+                        "value": "output.length > 50"
+                    }
+                ]
+            },
+            {
+                "vars": {
+                    "concept": "machine learning"
+                },
+                "assert": [
+                    {
+                        "type": "contains-any",
+                        "value": ["model", "data", "learning", "algorithm"]
+                    },
+                    {
+                        "type": "javascript",
+                        "value": "output.length > 30"
+                    }
+                ]
+            },
+            {
+                "vars": {
+                    "task": "sort a list in Python"
+                },
+                "assert": [
+                    {
+                        "type": "contains-any",
+                        "value": ["sort", "sorted", "python"]
+                    },
+                    {
+                        "type": "javascript",
+                        "value": "output.length > 20"
+                    }
+                ]
+            },
+            {
+                "description": "Factual accuracy test",
+                "vars": {
+                    "topic": "the solar system"
+                },
+                "assert": [
+                    {
+                        "type": "llm-rubric",
+                        "value": "The output should mention planets and be factually accurate"
+                    }
+                ]
+            },
+            {
+                "description": "Coherence test",
+                "vars": {
+                    "concept": "quantum computing"
+                },
+                "assert": [
+                    {
+                        "type": "javascript",
+                        "value": "output.length > 50 && output.length < 500"
+                    }
+                ]
+            }
+        ],
+        "outputPath": "./promptfoo_results.json"
+    }
+    
+    # Write config file
+    config_file = "promptfooconfig.json"
+    with open(config_file, "w") as f:
+        json.dump(config, f, indent=2)
+    
+    print(f"Created Promptfoo config: {config_file}")
+    print(json.dumps(config, indent=2))
+    
+    # Run promptfoo evaluation
+    print("\n" + "="*60)
+    print("Running Promptfoo evaluation...")
+    print("="*60 + "\n")
+    
+    try:
+        result = subprocess.run(
+            ["promptfoo", "eval", "-c", config_file],
+            capture_output=True,
+            text=True,
+            check=True
+        )
+        print(result.stdout)
+        if result.stderr:
+            print("Warnings/Info:", result.stderr)
+        
+        # Display results
+        print("\n" + "="*60)
+        print("Generating report...")
+        print("="*60 + "\n")
+        
+        subprocess.run(
+            ["promptfoo", "view", "--no-open"],
+            check=False
+        )
+        
+        # Print summary
+        if os.path.exists("promptfoo_results.json"):
+            with open("promptfoo_results.json", "r") as f:
+                results = json.load(f)
+            print("\n" + "="*60)
+            print("EVALUATION SUMMARY")
+            print("="*60)
+            print(json.dumps(results.get("stats", {}), indent=2))
+        
+        print("\nPromptfoo evaluation completed successfully!")
+        print(f"Results saved to: {config_dir}")
+        
+    except subprocess.CalledProcessError as e:
+        print(f"Promptfoo evaluation failed: {e}")
+        print(f"stdout: {e.stdout}")
+        print(f"stderr: {e.stderr}")
+        raise
+
+
+@dsl.component(
+    base_image=BASE_IMAGE
+)
+def test_vllm_server(
+    server_url: str,
+    model_name: str,
+    test_prompt: str = "Hello, how are you?"
+):
+    """
+    Simple health check and basic test of the vLLM server
+    
+    Args:
+        server_url: URL of the vLLM server
+        model_name: Model name to use in the request
+        test_prompt: Test prompt to send
+    """
+    import requests
+    import json
+    import time
+    
+    print(f"Testing vLLM server at: {server_url}")
+    print(f"Test prompt: {test_prompt}")
+    
+    # Wait for server to be ready
+    max_retries = 10
+    for i in range(max_retries):
+        try:
+            response = requests.get(f"{server_url}/health")
+            if response.status_code == 200:
+                print("Server is healthy!")
+                break
+        except Exception as e:
+            print(f"Waiting for server... (attempt {i+1}/{max_retries})")
+            time.sleep(5)
+    else:
+        print("Server health check failed")
+        return
+    
+    # Test completion endpoint
+    try:
+        payload = {
+            "model": model_name,
+            "prompt": test_prompt,
+            "max_tokens": 100,
+            "temperature": 0.7
+        }
+        
+        print(f"Sending request: {json.dumps(payload, indent=2)}")
+        
+        response = requests.post(
+            f"{server_url}/v1/completions",
+            json=payload,
+            headers={"Content-Type": "application/json"}
+        )
+        
+        if response.status_code == 200:
+            result = response.json()
+            print("Success! Response:")
+            print(json.dumps(result, indent=2))
+        else:
+            print(f"Error: {response.status_code}")
+            print(response.text)
+            
+    except Exception as e:
+        print(f"Error testing server: {e}")
+        raise
+
+
 @dsl.pipeline(
     name="model-download-and-vllm-test",
     description="Downloads a model from HuggingFace and starts a vLLM server for testing with PVC storage and Promptfoo evaluation"
@@ -434,7 +693,6 @@ if __name__ == '__main__':
         "tensor_parallel_size": 1,
         "max_model_len": 2048,
         "test_prompt": "Once upon a time",
-        "run_promptfoo": True,  # Enable Promptfoo-style evaluation tests
     }
 
     # Data Science Pipelines route
